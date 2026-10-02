@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Shot Timer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;800&family=Barlow:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --felt:#0F5640; --felt-deep:#0A3D2E; --ivory:#F3EFE4; --chalk:#3E8CC9;
+  --amber:#E8A33D; --red:#D23B2E; --rail:#5A3A22;
+  --bg:var(--felt); --text:var(--ivory);
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --felt:#0C4433; --felt-deep:#072A20; }
+}
+:root[data-theme="dark"]{ --felt:#0C4433; --felt-deep:#072A20; }
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+body{
+  background:radial-gradient(ellipse at 50% 35%, var(--felt) 0%, var(--felt-deep) 85%);
+  background-color:var(--felt-deep);
+  color:var(--text); font-family:"Barlow",system-ui,-apple-system,sans-serif;
+  display:flex; flex-direction:column; align-items:center;
+  -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent;
+  overflow:hidden; touch-action:manipulation;
+  transition:background-color .3s;
+}
+body.flash{animation:flash .35s 4}
+@keyframes flash{50%{background:var(--red)}}
+@media (prefers-reduced-motion:reduce){body.flash{animation:none}}
+header{width:100%;max-width:520px;display:flex;justify-content:space-between;align-items:center;padding:14px 20px 0}
+h1{font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:800;font-size:1.5rem;margin:0;letter-spacing:.02em}
+.toggle{background:none;border:1.5px solid rgba(243,239,228,.35);color:var(--ivory);font:600 .9rem "Barlow",sans-serif;border-radius:999px;padding:7px 14px}
+.toggle[aria-pressed="false"]{opacity:.55}
+main{flex:1;width:100%;max-width:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:0 20px}
+.clock{position:relative;width:min(78vw,52vh,380px);aspect-ratio:1;border:0;background:none;padding:0;color:inherit}
+.clock svg{width:100%;height:100%;transform:rotate(-90deg)}
+.track{fill:none;stroke:rgba(0,0,0,.28);stroke-width:14}
+.arc{fill:none;stroke:var(--chalk);stroke-width:14;stroke-linecap:round;transition:stroke .25s}
+.tick{stroke:var(--ivory);stroke-width:3;opacity:.7}
+.readout{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.secs{font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:800;font-size:clamp(6rem,30vw,10rem);line-height:.85;font-variant-numeric:tabular-nums}
+.state{font-size:1rem;opacity:.75;margin-top:6px}
+.phase-amber .arc{stroke:var(--amber)} .phase-amber .secs{color:var(--amber)}
+.phase-red .arc{stroke:var(--red)} .phase-red .secs{color:#FF8A7E}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
+.btn{border:0;border-radius:18px;padding:20px 10px;font:600 1.25rem "Barlow",sans-serif;color:var(--felt-deep);background:var(--ivory);box-shadow:0 4px 0 rgba(0,0,0,.3)}
+.btn:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.3)}
+.btn.primary{grid-column:1 / -1;background:var(--chalk);color:#fff;font-size:1.5rem;padding:24px}
+.btn.ghost{background:rgba(0,0,0,.25);color:var(--ivory)}
+.btn:focus-visible,.toggle:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+.marks{font-size:.95rem;opacity:.7;text-align:center;margin:0 0 18px}
+.hidden-haptic{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
+</style>
+</head>
+<body>
+<header>
+  <h1>Shot timer</h1>
+  <button class="toggle" id="soundBtn" aria-pressed="true">Sound on</button>
+</header>
+<main>
+  <button class="clock" id="clock" aria-label="Start or pause timer">
+    <svg viewBox="0 0 200 200" aria-hidden="true">
+      <circle class="track" cx="100" cy="100" r="88"/>
+      <circle class="arc" id="arc" cx="100" cy="100" r="88"/>
+      <g id="ticks"></g>
+    </svg>
+    <div class="readout">
+      <div class="secs" id="secs">0</div>
+      <div class="state" id="state">Tap to start</div>
+    </div>
+  </button>
+  <div class="controls">
+    <button class="btn primary" id="nextBtn">Next shot</button>
+    <button class="btn" id="startBtn">Start</button>
+    <button class="btn ghost" id="resetBtn">Reset</button>
+  </div>
+</main>
+<p class="marks">Buzzes at 30, 50 and 60 seconds</p>
+<label class="hidden-haptic" id="hapticLabel" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
+
+<script>
+(function(){
+  var LIMIT = 60, ALERTS = [30, 50, 60];
+  var R = 88, CIRC = 2 * Math.PI * R;
+  var arc = document.getElementById('arc');
+  var secsEl = document.getElementById('secs'), stateEl = document.getElementById('state');
+  var clock = document.getElementById('clock'), startBtn = document.getElementById('startBtn');
+  var soundBtn = document.getElementById('soundBtn'), hapticLabel = document.getElementById('hapticLabel');
+
+  arc.style.strokeDasharray = CIRC; arc.style.strokeDashoffset = CIRC;
+
+  // tick marks at alert points
+  var ticks = document.getElementById('ticks');
+  ALERTS.slice(0,2).forEach(function(s){
+    var a = (s / LIMIT) * 2 * Math.PI;
+    var x1 = 100 + 78*Math.cos(a), y1 = 100 + 78*Math.sin(a);
+    var x2 = 100 + 98*Math.cos(a), y2 = 100 + 98*Math.sin(a);
+    var l = document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);
+    l.setAttribute('class','tick'); ticks.appendChild(l);
+  });
+
+  var running = false, startedAt = 0, banked = 0, fired = {}, raf = null, iv = null;
+  var soundOn = true, ctx = null, wakeLock = null;
+
+  function elapsed(){ return banked + (running ? (performance.now() - startedAt) / 1000 : 0); }
+
+  // ---- alerts ----
+  function audio(){
+    if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  function beep(freq, dur, at){
+    var c = audio(); if (!c || !soundOn) return;
+    var o = c.createOscillator(), g = c.createGain(), t = c.currentTime + (at||0);
+    o.type = 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function haptic(pattern){
+    if (navigator.vibrate) { navigator.vibrate(pattern); return; }
+    // iPhone fallback: toggling a native switch triggers a system haptic (iOS 18+ Safari)
+    var pulses = Math.ceil(pattern.length / 2);
+    for (var i = 0; i < pulses; i++) setTimeout(function(){ hapticLabel.click(); }, i * 180);
+  }
+  function alertAt(s){
+    if (s === 30){ haptic([250]); beep(880, .25); }
+    if (s === 50){ haptic([250,120,250]); beep(880,.2); beep(880,.2,.3); }
+    if (s === 60){ haptic([700,150,700]); beep(660,.6); beep(440,.8,.7);
+      document.body.classList.remove('flash'); void document.body.offsetWidth; document.body.classList.add('flash'); }
+  }
+
+  // ---- render ----
+  function render(){
+    var e = Math.min(elapsed(), LIMIT);
+    var whole = Math.floor(e);
+    secsEl.textContent = whole;
+    arc.style.strokeDashoffset = CIRC * (1 - e / LIMIT);
+    clock.classList.toggle('phase-amber', e >= 30 && e < 50);
+    clock.classList.toggle('phase-red', e >= 50);
+    ALERTS.forEach(function(s){ if (e >= s && !fired[s]) { fired[s] = true; alertAt(s); } });
+    if (e >= LIMIT && running){ stop(); stateEl.textContent = 'Time'; }
+  }
+  function loop(){ render(); if (running) raf = requestAnimationFrame(loop); }
+
+  // ---- controls ----
+  function start(){
+    if (running || elapsed() >= LIMIT) return;
+    audio(); running = true; startedAt = performance.now();
+    iv = setInterval(render, 200); // keeps alerts firing if animation frames are throttled
+    loop(); stateEl.textContent = 'Running'; startBtn.textContent = 'Pause';
+    keepAwake();
+  }
+  function stop(){
+    if (!running) return;
+    banked = elapsed(); running = false;
+    cancelAnimationFrame(raf); clearInterval(iv);
+    startBtn.textContent = 'Start';
+  }
+  function pause(){ stop(); stateEl.textContent = 'Paused'; }
+  function reset(){
+    stop(); banked = 0; fired = {}; render();
+    stateEl.textContent = 'Tap to start'; document.body.classList.remove('flash');
+  }
+  function toggle(){ running ? pause() : (elapsed() >= LIMIT ? (reset(), start()) : start()); }
+
+  async function keepAwake(){
+    try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', function(){ wakeLock = null; }); } } catch(e){}
+  }
+  document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible' && running) keepAwake(); });
+
+  clock.addEventListener('click', toggle);
+  startBtn.addEventListener('click', toggle);
+  document.getElementById('resetBtn').addEventListener('click', reset);
+  document.getElementById('nextBtn').addEventListener('click', function(){ reset(); start(); });
+  soundBtn.addEventListener('click', function(){
+    soundOn = !soundOn; soundBtn.setAttribute('aria-pressed', soundOn);
+    soundBtn.textContent = soundOn ? 'Sound on' : 'Sound off'; audio();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space'){ e.preventDefault(); toggle(); }
+    if (e.key === 'r' || e.key === 'R') reset();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
