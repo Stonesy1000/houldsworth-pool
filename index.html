@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Houldsworth Pool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800&family=Barlow:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--felt:#0F5640;--deep:#0A3D2E;--ivory:#F3EFE4;--chalk:#3E8CC9;--amber:#E8A33D;--line:rgba(243,239,228,.18);
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--felt:#0C4433;--deep:#072A20}}
+:root[data-theme="dark"]{--felt:#0C4433;--deep:#072A20}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+body{background:var(--deep);color:var(--ivory);font:500 1rem/1.4 "Barlow",system-ui,sans-serif;display:flex;flex-direction:column}
+header{padding:14px 18px 8px;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+h1{font:800 1.6rem "Big Shoulders Display",Impact,sans-serif;margin:0}
+#updated{font-size:.85rem;opacity:.7;text-align:right}
+main{flex:1;overflow:auto;padding:0 18px 18px}
+section{display:none;max-width:640px;margin:0 auto}section.on{display:block}
+h2{font:800 1.3rem "Big Shoulders Display",Impact,sans-serif;margin:14px 0 8px}
+p.hint{opacity:.7;font-size:.9rem;margin:4px 0 12px}
+.row{display:flex;gap:8px}
+input,select{flex:1;min-width:0;font:inherit;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:rgba(0,0,0,.25);color:var(--ivory)}
+button{font:600 1rem "Barlow",sans-serif;border:0;border-radius:12px;padding:12px 16px;background:var(--ivory);color:var(--deep)}
+button.alt{background:rgba(0,0,0,.25);color:var(--ivory);border:1.5px solid var(--line)}
+button.go{background:var(--chalk);color:#fff}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+ul{list-style:none;padding:0;margin:10px 0}
+li{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line)}
+li label{flex:1;display:flex;align-items:center;gap:10px}
+li input[type=checkbox]{flex:none;width:22px;height:22px;accent-color:var(--chalk)}
+li .used{opacity:.45;text-decoration:line-through}
+.x{background:none;color:var(--ivory);opacity:.6;padding:6px 10px}
+.card{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:14px;padding:12px;margin:10px 0}
+.card h3{margin:0 0 6px;font-size:.95rem;opacity:.8}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;font-size:.85rem;width:100%}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{opacity:.7;font-weight:600}
+.frame{display:flex;justify-content:space-between;gap:8px}
+.empty{opacity:.7;padding:14px 0}
+.err{color:var(--amber)}
+nav{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--felt)}
+nav button{background:none;color:var(--ivory);border-radius:0;padding:14px 4px;opacity:.6}
+nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)}
+#timer.on{height:100%;max-width:none}
+#timer iframe{border:0;width:100%;height:100%;min-height:70vh;display:block}
+</style>
+</head>
+<body>
+<header><h1>Houldsworth</h1><div id="updated">Loading stats…</div></header>
+<main>
+  <section id="tonight" class="on">
+    <h2>Who's in tonight</h2>
+    <p class="hint">Add the squad once. Tick who's here each week.</p>
+    <div class="row"><input id="newPlayer" list="allNames" placeholder="Player name"><button id="addPlayer">Add</button></div>
+    <ul id="squad"></ul>
+    <button class="alt" id="newNight">Start a new night</button>
+  </section>
+
+  <section id="opponent">
+    <h2>Their player</h2>
+    <div class="row"><input id="oppName" list="allNames" placeholder="Start typing their name"><button class="go" id="lookup">Look up</button></div>
+    <div id="oppStats"></div>
+    <div id="pickBox" hidden>
+      <h2>Our player</h2>
+      <p class="hint">Automatic suggestions switch on once the stats are mapped.</p>
+      <div class="row"><select id="ourPick"></select><button class="go" id="confirm">Confirm</button></div>
+    </div>
+    <h2>Tonight's frames</h2>
+    <ul id="frames"></ul>
+  </section>
+
+  <section id="data">
+    <h2>League data</h2>
+    <div id="dataStatus"></div>
+    <select id="pageSel"></select>
+    <div id="pageTables"></div>
+  </section>
+
+  <section id="timer"><iframe src="timer.html" title="Shot timer" allow="screen-wake-lock"></iframe></section>
+</main>
+<nav role="tablist">
+  <button role="tab" data-tab="tonight" aria-selected="true">Tonight</button>
+  <button role="tab" data-tab="opponent" aria-selected="false">Opponent</button>
+  <button role="tab" data-tab="data" aria-selected="false">Data</button>
+  <button role="tab" data-tab="timer" aria-selected="false">Timer</button>
+</nav>
+<datalist id="allNames"></datalist>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var esc = function(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); };
+  var store = {
+    get: function(k, d){ try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } },
+    set: function(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+  };
+  var squad = store.get('squad', []);      // [{name, in}]
+  var frames = store.get('frames', []);    // [{them, us}]
+  var data = { pages: [] };
+
+  // ---- tabs ----
+  document.querySelectorAll('nav button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('nav button').forEach(function(x){ x.setAttribute('aria-selected', x === b); });
+      document.querySelectorAll('section').forEach(function(s){ s.classList.toggle('on', s.id === b.dataset.tab); });
+      if (b.dataset.tab === 'opponent') refreshPick();
+    });
+  });
+
+  // ---- squad ----
+  function save(){ store.set('squad', squad); store.set('frames', frames); }
+  function used(name){ return frames.some(function(f){ return f.us === name; }); }
+  function renderSquad(){
+    if (!squad.length){ $('squad').innerHTML = '<li class="empty">No players yet. Add your squad above.</li>'; return; }
+    $('squad').innerHTML = squad.map(function(p, i){
+      return '<li><label><input type="checkbox" data-i="'+i+'" '+(p.in?'checked':'')+'><span class="'+(used(p.name)?'used':'')+'">'+esc(p.name)+'</span></label>'+
+             '<button class="x" data-del="'+i+'" aria-label="Remove '+esc(p.name)+'">✕</button></li>';
+    }).join('');
+  }
+  $('squad').addEventListener('change', function(e){ var i = e.target.dataset.i; if (i != null){ squad[i].in = e.target.checked; save(); } });
+  $('squad').addEventListener('click', function(e){ var i = e.target.dataset.del; if (i != null){ squad.splice(i,1); save(); renderSquad(); } });
+  $('addPlayer').addEventListener('click', function(){
+    var n = $('newPlayer').value.trim(); if (!n) return;
+    if (!squad.some(function(p){ return p.name.toLowerCase() === n.toLowerCase(); })) squad.push({ name: n, in: true });
+    $('newPlayer').value = ''; save(); renderSquad();
+  });
+  $('newNight').addEventListener('click', function(){
+    if (!confirm('Clear tonight\'s frames and untick everyone?')) return;
+    frames = []; squad.forEach(function(p){ p.in = false; }); save(); renderSquad(); renderFrames();
+  });
+
+  // ---- opponent lookup ----
+  function tableHtml(cols, rows){
+    return '<div class="scroll"><table><thead><tr>'+cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+
+      '</tr></thead><tbody>'+rows.map(function(r){ return '<tr>'+r.map(function(c){ return '<td>'+esc(c)+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>';
+  }
+  $('lookup').addEventListener('click', function(){
+    var q = $('oppName').value.trim().toLowerCase(); if (!q) return;
+    var hits = [];
+    data.pages.forEach(function(pg){ (pg.tables||[]).forEach(function(t){
+      var rows = t.rows.filter(function(r){ return r.some(function(c){ return String(c).toLowerCase().indexOf(q) > -1; }); });
+      if (rows.length) hits.push('<div class="card"><h3>'+esc(pg.label)+'</h3>'+tableHtml(t.columns, rows)+'</div>');
+    }); });
+    $('oppStats').innerHTML = hits.length ? hits.join('') : '<p class="empty">No stats found for that name. Check spelling, or they may be new this season.</p>';
+    $('pickBox').hidden = false; refreshPick();
+  });
+  function refreshPick(){
+    var avail = squad.filter(function(p){ return p.in && !used(p.name); });
+    $('ourPick').innerHTML = avail.length ? avail.map(function(p){ return '<option>'+esc(p.name)+'</option>'; }).join('')
+                                          : '<option value="">Nobody available – tick players on Tonight</option>';
+  }
+  $('confirm').addEventListener('click', function(){
+    var us = $('ourPick').value, them = $('oppName').value.trim();
+    if (!us || !them) return;
+    frames.push({ them: them, us: us }); save();
+    $('oppName').value = ''; $('oppStats').innerHTML = ''; $('pickBox').hidden = true;
+    renderFrames(); renderSquad();
+  });
+  function renderFrames(){
+    $('frames').innerHTML = frames.length ? frames.map(function(f, i){
+      return '<li><span class="frame" style="flex:1"><span>'+(i+1)+'. '+esc(f.us)+'</span><span>v '+esc(f.them)+'</span></span><button class="x" data-f="'+i+'" aria-label="Undo frame">✕</button></li>';
+    }).join('') : '<li class="empty">No frames set yet.</li>';
+  }
+  $('frames').addEventListener('click', function(e){ var i = e.target.dataset.f; if (i != null){ frames.splice(i,1); save(); renderFrames(); renderSquad(); } });
+
+  // ---- data ----
+  function loadData(){
+    fetch('data/latest.json?v=' + Date.now()).then(function(r){ return r.json(); }).then(function(d){
+      data = d;
+      $('updated').textContent = d.updated ? 'Stats updated ' + d.updated : 'No stats pulled yet';
+      $('dataStatus').innerHTML = d.updated
+        ? '<p class="hint">'+d.pages.length+' page(s) pulled'+(d.failed ? ', <span class="err">'+d.failed+' failed</span>' : '')+'.</p>'
+        : '<p class="empty">No data yet. Run the weekly pull on GitHub (see SETUP).</p>';
+      $('pageSel').innerHTML = d.pages.map(function(p, i){ return '<option value="'+i+'">'+esc(p.label)+(p.error?' (failed)':'')+'</option>'; }).join('');
+      $('pageSel').hidden = !d.pages.length; showPage();
+      var names = {};
+      d.pages.forEach(function(pg){ (pg.tables||[]).forEach(function(t){
+        var col = t.columns.findIndex(function(c){ return /player|name/i.test(c); });
+        if (col < 0) return;
+        t.rows.forEach(function(r){ var n = String(r[col]).trim(); if (n && n.length < 40) names[n] = 1; });
+      }); });
+      $('allNames').innerHTML = Object.keys(names).sort().map(function(n){ return '<option value="'+esc(n)+'">'; }).join('');
+    }).catch(function(){ $('updated').textContent = 'Stats unavailable offline'; });
+  }
+  function showPage(){
+    var pg = data.pages[$('pageSel').value]; if (!pg){ $('pageTables').innerHTML = ''; return; }
+    $('pageTables').innerHTML = pg.error ? '<p class="err">'+esc(pg.error)+'</p>'
+      : (pg.tables.length ? pg.tables.map(function(t, i){ return '<div class="card"><h3>Table '+(i+1)+'</h3>'+tableHtml(t.columns, t.rows)+'</div>'; }).join('')
+                          : '<p class="empty">No tables on this page.</p>');
+  }
+  $('pageSel').addEventListener('change', showPage);
+
+  renderSquad(); renderFrames(); loadData();
+})();
+</script>
+</body>
+</html>
