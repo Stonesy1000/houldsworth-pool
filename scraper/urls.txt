@@ -1,0 +1,5 @@
+# One page per line:  Label | address
+# Add the PLAYER STATS page and the LEAGUE TABLE page for Premier 1 and Premier 2,
+# for this season and the previous 3 (switch season with the site's dropdown, then copy the address).
+# Lines starting with # are ignored. Example:
+Match 44186194 | https://stockpool00.leaguerepublic.com/match/44186194.html
