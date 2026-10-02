@@ -47,6 +47,9 @@ th{opacity:.7;font-weight:600}
 nav{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--felt)}
 nav button{background:none;color:var(--ivory);border-radius:0;padding:14px 4px;opacity:.6}
 nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)}
+
+.paste{min-height:90px;max-height:120px;overflow:hidden;border:1.5px dashed var(--line);border-radius:12px;padding:12px;margin:8px 0;opacity:.85}
+.paste:focus{outline:3px solid var(--amber)}
 #timer.on{height:100%;max-width:none}
 #timer iframe{border:0;width:100%;height:100%;min-height:70vh;display:block}
 </style>
@@ -76,6 +79,14 @@ nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)
   </section>
 
   <section id="data">
+    <h2>Update stats</h2>
+    <div class="card">
+      <p class="hint">Open the league stats page, select all, copy, then tap the box and paste. Do one page at a time.</p>
+      <input id="pasteLabel" placeholder="Which page? e.g. Premier 1 players 2025-26">
+      <div id="pasteBox" class="paste" contenteditable="true" role="textbox" aria-label="Paste league page here">Tap here and paste</div>
+      <p id="pasteMsg" class="hint"></p>
+      <button class="alt" id="clearPasted">Remove pasted stats</button>
+    </div>
     <h2>League data</h2>
     <div id="dataStatus"></div>
     <select id="pageSel"></select>
@@ -170,24 +181,66 @@ nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)
   $('frames').addEventListener('click', function(e){ var i = e.target.dataset.f; if (i != null){ frames.splice(i,1); save(); renderFrames(); renderSquad(); } });
 
   // ---- data ----
-  function loadData(){
-    fetch('data/latest.json?v=' + Date.now()).then(function(r){ return r.json(); }).then(function(d){
-      data = d;
-      $('updated').textContent = d.updated ? 'Stats updated ' + d.updated : 'No stats pulled yet';
-      $('dataStatus').innerHTML = d.updated
-        ? '<p class="hint">'+d.pages.length+' page(s) pulled'+(d.failed ? ', <span class="err">'+d.failed+' failed</span>' : '')+'.</p>'
-        : '<p class="empty">No data yet. Run the weekly pull on GitHub (see SETUP).</p>';
-      $('pageSel').innerHTML = d.pages.map(function(p, i){ return '<option value="'+i+'">'+esc(p.label)+(p.error?' (failed)':'')+'</option>'; }).join('');
-      $('pageSel').hidden = !d.pages.length; showPage();
-      var names = {};
-      d.pages.forEach(function(pg){ (pg.tables||[]).forEach(function(t){
-        var col = t.columns.findIndex(function(c){ return /player|name/i.test(c); });
-        if (col < 0) return;
-        t.rows.forEach(function(r){ var n = String(r[col]).trim(); if (n && n.length < 40) names[n] = 1; });
-      }); });
-      $('allNames').innerHTML = Object.keys(names).sort().map(function(n){ return '<option value="'+esc(n)+'">'; }).join('');
-    }).catch(function(){ $('updated').textContent = 'Stats unavailable offline'; });
+  var pulled = { pages: [], updated: null, failed: 0 }, pasted = store.get('pasted', []);
+  function merge(){
+    var labels = pasted.map(function(p){ return p.label; });
+    data = { pages: pasted.concat(pulled.pages.filter(function(p){ return labels.indexOf(p.label) < 0 && !p.error; })) };
+    var last = pasted.reduce(function(m, p){ return p.pasted > m ? p.pasted : m; }, '');
+    $('updated').textContent = last ? 'Stats pasted ' + new Date(last).toLocaleDateString('en-GB')
+                             : (pulled.updated ? 'Stats updated ' + pulled.updated : 'No stats yet');
+    $('dataStatus').innerHTML = data.pages.length
+      ? '<p class="hint">' + data.pages.length + ' page(s) of stats saved.</p>'
+      : '<p class="empty">No stats yet. Paste a league page above.</p>';
+    $('pageSel').innerHTML = data.pages.map(function(p, i){ return '<option value="'+i+'">'+esc(p.label)+'</option>'; }).join('');
+    $('pageSel').hidden = !data.pages.length; showPage();
+    var names = {};
+    data.pages.forEach(function(pg){ (pg.tables||[]).forEach(function(t){
+      var col = t.columns.findIndex(function(c){ return /player|name/i.test(c); });
+      if (col < 0) return;
+      t.rows.forEach(function(r){ var n = String(r[col] || '').trim(); if (n && n.length < 40) names[n] = 1; });
+    }); });
+    $('allNames').innerHTML = Object.keys(names).sort().map(function(n){ return '<option value="'+esc(n)+'">'; }).join('');
   }
+  function loadData(){
+    fetch('data/latest.json?v=' + Date.now()).then(function(r){ return r.json(); })
+      .then(function(d){ pulled = d; merge(); }).catch(function(){ merge(); });
+  }
+  function cellText(c){ return c.textContent.replace(/\s+/g, ' ').trim(); }
+  function tablesFromHtml(html){
+    var doc = new DOMParser().parseFromString(html, 'text/html'), out = [];
+    doc.querySelectorAll('table').forEach(function(tb){
+      var rows = Array.prototype.map.call(tb.querySelectorAll('tr'), function(tr){
+        return Array.prototype.map.call(tr.querySelectorAll('th,td'), cellText);
+      }).filter(function(r){ return r.some(function(c){ return c; }); });
+      if (rows.length > 1) out.push({ columns: rows[0], rows: rows.slice(1) });
+    });
+    return out;
+  }
+  function tablesFromText(txt){
+    var lines = txt.split(/\r?\n/).filter(function(l){ return l.indexOf('\t') > -1; })
+                   .map(function(l){ return l.split('\t').map(function(c){ return c.trim(); }); });
+    return lines.length > 1 ? [{ columns: lines[0], rows: lines.slice(1) }] : [];
+  }
+  $('pasteBox').addEventListener('paste', function(e){
+    e.preventDefault();
+    var cd = e.clipboardData || window.clipboardData;
+    var html = cd.getData('text/html'), txt = cd.getData('text/plain');
+    var tables = html ? tablesFromHtml(html) : [];
+    if (!tables.length) tables = tablesFromText(txt || '');
+    if (!tables.length){ $('pasteMsg').innerHTML = '<span class="err">No tables found. Copy the whole page (select all) and paste again.</span>'; return; }
+    var label = $('pasteLabel').value.trim() || ('Pasted ' + new Date().toLocaleDateString('en-GB'));
+    pasted = pasted.filter(function(p){ return p.label !== label; });
+    pasted.push({ label: label, url: '', pasted: new Date().toISOString(), tables: tables });
+    store.set('pasted', pasted);
+    $('pasteMsg').textContent = 'Saved ' + tables.length + ' table(s) as "' + label + '".';
+    $('pasteLabel').value = ''; $('pasteBox').textContent = 'Tap here and paste';
+    merge();
+  });
+  $('pasteBox').addEventListener('focus', function(){ if ($('pasteBox').textContent === 'Tap here and paste') $('pasteBox').textContent = ''; });
+  $('clearPasted').addEventListener('click', function(){
+    if (!confirm('Remove all pasted stats from this phone?')) return;
+    pasted = []; store.set('pasted', pasted); $('pasteMsg').textContent = ''; merge();
+  });
   function showPage(){
     var pg = data.pages[$('pageSel').value]; if (!pg){ $('pageTables').innerHTML = ''; return; }
     $('pageTables').innerHTML = pg.error ? '<p class="err">'+esc(pg.error)+'</p>'
