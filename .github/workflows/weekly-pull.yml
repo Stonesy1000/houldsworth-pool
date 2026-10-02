@@ -1,0 +1,24 @@
+name: Weekly league pull
+on:
+  schedule:
+    - cron: "0 6 * * 4"   # Thursdays 06:00 UTC
+  workflow_dispatch:       # adds a "Run workflow" button for manual runs
+permissions:
+  contents: write
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r scraper/requirements.txt
+      - run: python scraper/pull.py
+      - name: Save data
+        run: |
+          git config user.name "league-data"
+          git config user.email "league-data@users.noreply.github.com"
+          git add data/latest.json
+          git diff --staged --quiet || git commit -m "League data $(date +%F)"
+          git push
