@@ -71,7 +71,7 @@ nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)
     <div id="oppStats"></div>
     <div id="pickBox" hidden>
       <h2>Our player</h2>
-      <p class="hint">Automatic suggestions switch on once the stats are mapped.</p>
+      <div id="suggest" class="card" hidden></div>
       <div class="row"><select id="ourPick"></select><button class="go" id="confirm">Confirm</button></div>
     </div>
     <h2>Tonight's frames</h2>
@@ -81,7 +81,7 @@ nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)
   <section id="data">
     <h2>Update stats</h2>
     <div class="card">
-      <p class="hint">Open the league stats page, select all, copy, then tap the box and paste. Do one page at a time.</p>
+      <p class="hint">Open a league player stats page, select all, copy, then tap the box and paste. Do one page at a time and put the season in the name, e.g. "Premier 1 players 2024-25", so recent form counts most.</p>
       <input id="pasteLabel" placeholder="Which page? e.g. Premier 1 players 2025-26">
       <div id="pasteBox" class="paste" contenteditable="true" role="textbox" aria-label="Paste league page here">Tap here and paste</div>
       <p id="pasteMsg" class="hint"></p>
@@ -161,10 +161,59 @@ nav button[aria-selected="true"]{opacity:1;box-shadow:inset 0 3px 0 var(--chalk)
     $('oppStats').innerHTML = hits.length ? hits.join('') : '<p class="empty">No stats found for that name. Check spelling, or they may be new this season.</p>';
     $('pickBox').hidden = false; refreshPick();
   });
+  // ---- matchup scoring ----
+  function colIdx(cols, re){ for (var i = 0; i < cols.length; i++){ if (re.test(String(cols[i]).trim())) return i; } return -1; }
+  function num(v){ var n = parseFloat(String(v).replace(/[^0-9.]/g, '')); return isNaN(n) ? null : n; }
+  function yearOf(label){ var m = String(label).match(/20[0-9][0-9]/g); return m ? Math.max.apply(null, m.map(Number)) : null; }
+  function record(name){
+    var key = name.trim().toLowerCase(), w = 0, p = 0, years = [];
+    data.pages.forEach(function(pg){ var y = yearOf(pg.label); if (y) years.push(y); });
+    var latest = years.length ? Math.max.apply(null, years) : null;
+    data.pages.forEach(function(pg){
+      var y = yearOf(pg.label), wt = (latest && y) ? Math.max(1, 3 - (latest - y)) : 1;
+      (pg.tables || []).forEach(function(t){
+        var c = t.columns, ci = colIdx(c, /player|name/i);
+        if (ci < 0) return;
+        var pi = colIdx(c, /^(p|pl|pld|played|frames|frames played|fp)$/i),
+            wi = colIdx(c, /^(w|won|fw|frames won)$/i),
+            li = colIdx(c, /^(l|lost|fl|frames lost)$/i),
+            ri = colIdx(c, /%|pct|perc|ratio/i);
+        t.rows.forEach(function(r){
+          if (String(r[ci] || '').trim().toLowerCase() !== key) return;
+          var P = pi > -1 ? num(r[pi]) : null, W = wi > -1 ? num(r[wi]) : null, L = li > -1 ? num(r[li]) : null, R = ri > -1 ? num(r[ri]) : null;
+          if (P == null && W != null && L != null) P = W + L;
+          if (W == null && P != null && R != null) W = P * (R > 1 ? R / 100 : R);
+          if (P == null || W == null || P <= 0) return;
+          w += W * wt; p += P * wt;
+        });
+      });
+    });
+    return { w: w, p: p };
+  }
+  function strength(name){
+    var r = record(name), rate = (r.w + 5) / (r.p + 10);   // pulls small samples towards 50%
+    return { s: Math.log(rate / (1 - rate)), games: r.p, rate: rate };
+  }
   function refreshPick(){
     var avail = squad.filter(function(p){ return p.in && !used(p.name); });
-    $('ourPick').innerHTML = avail.length ? avail.map(function(p){ return '<option>'+esc(p.name)+'</option>'; }).join('')
-                                          : '<option value="">Nobody available – tick players on Tonight</option>';
+    var them = $('oppName').value.trim(), box = $('suggest');
+    if (!avail.length){
+      $('ourPick').innerHTML = '<option value="">Nobody available – tick players on Tonight</option>';
+      box.hidden = true; return;
+    }
+    if (!them){ $('ourPick').innerHTML = avail.map(function(p){ return '<option>'+esc(p.name)+'</option>'; }).join(''); box.hidden = true; return; }
+    var opp = strength(them);
+    var ranked = avail.map(function(p){
+      var me = strength(p.name);
+      return { name: p.name, chance: 1 / (1 + Math.exp(-(me.s - opp.s))), games: me.games };
+    }).sort(function(a, b){ return b.chance - a.chance; });
+    $('ourPick').innerHTML = ranked.map(function(x){
+      return '<option value="'+esc(x.name)+'">'+esc(x.name)+' – '+Math.round(x.chance*100)+'%</option>'; }).join('');
+    var top = ranked[0];
+    box.hidden = false;
+    box.innerHTML = '<h3>Suggested</h3><p><strong>'+esc(top.name)+'</strong> – '+Math.round(top.chance*100)+'% win chance v '+esc(them)+'</p>'+
+      '<p class="hint">Based on '+Math.round(opp.games)+' weighted frames for them'+(opp.games < 5 ? ' (little data – treat as a guess)' : '')+
+      '. Current season counts 3x, last season 2x, older 1x.</p>';
   }
   $('confirm').addEventListener('click', function(){
     var us = $('ourPick').value, them = $('oppName').value.trim();
